@@ -1,8 +1,8 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>TriniFinBet</title>
 
 <!-- Charts & html2canvas -->
@@ -26,6 +26,7 @@
   main.main{margin:6px}
   .card{background:var(--card);border-radius:10px;padding:12px;border:1px solid var(--border);margin-bottom:12px;box-shadow:0 6px 18px rgba(2,6,23,0.02)}
   label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
+  input,select,textarea,button{font-family:inherit}
   input,select,textarea{width:100%;padding:8px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text);box-sizing:border-box}
   .row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px}
   .row.two>div{flex:1}
@@ -70,7 +71,7 @@
 </head>
 <body>
 <div class="app" id="app">
-  <header class="app-header">
+  <header class="app-header card" style="align-items:center">
     <div class="brand">
       <div class="logo" aria-hidden="true"></div>
       <div>
@@ -201,7 +202,7 @@
 
 <script>
 (() => {
-  const KEY = 'trinifinbet_final_v1';
+  const KEY = 'trinifinbet_prod_v1';
   const fmt = v => (Math.round((Number(v)||0)*100)/100).toFixed(2);
   const $ = s => document.querySelector(s);
   const $$ = s => Array.from(document.querySelectorAll(s));
@@ -225,7 +226,7 @@
   }
   function save(){ localStorage.setItem(KEY, JSON.stringify(store)); }
 
-  // navigation
+  // navigation screens
   function show(screen){
     $$('.screen').forEach(s=>s.classList.add('hidden'));
     $(`#screen-${screen}`).classList.remove('hidden');
@@ -233,7 +234,7 @@
   }
   $$('.nav-btn').forEach(b=> b.addEventListener('click', ()=> show(b.dataset.screen)));
 
-  // slips
+  // slip factory
   function createSlipElement(slip = {}, idx=0){
     const el = document.createElement('div'); el.className = 'slip';
     const head = document.createElement('div'); head.className = 'slip-head';
@@ -261,12 +262,18 @@
     `;
     el.appendChild(body);
 
+    // toggle
     head.addEventListener('click', ()=> body.classList.toggle('show'));
-    body.querySelector('.del-slip').addEventListener('click', ()=>{
+
+    // delete
+    body.querySelector('.del-slip').addEventListener('click', ()=> {
       if(!confirm('Delete this slip?')) return;
-      el.remove(); updateSlipsMsg();
+      el.remove();
+      updateSlipsMsg();
     });
-    body.querySelector('.save-slip').addEventListener('click', ()=>{
+
+    // save slip (keep in DOM as pending until Save Draw)
+    body.querySelector('.save-slip').addEventListener('click', ()=> {
       const number = parseInt(body.querySelector('.slip-number').value);
       const base = parseFloat(body.querySelector('.slip-base').value) || 0;
       const tickets = Math.max(1, parseInt(body.querySelector('.slip-tickets').value) || 1);
@@ -285,8 +292,10 @@
       el.dataset.balls = JSON.stringify(balls);
       el.querySelector('h4').textContent = `Bet Slip — #${number}`;
       updateSlipsMsg();
-      alert('Slip saved (still pending until you press "Save Draw").');
+      // small non-blocking notice
+      setTimeout(()=> alert('Slip saved (still pending until you press "Save Draw").'), 10);
     });
+
     return el;
   }
 
@@ -296,13 +305,14 @@
     $('#slipsMsg').textContent = `${saved}/${total} slips saved (press Save Draw to store the draw).`;
   }
 
+  // add/clear slips
   $('#addSlipBtn').addEventListener('click', ()=> {
     $('#slipsContainer').appendChild(createSlipElement({}, $('#slipsContainer').children.length));
     updateSlipsMsg();
   });
   $('#clearSlips').addEventListener('click', ()=> { if(!confirm('Clear all current slips?')) return; $('#slipsContainer').innerHTML = ''; updateSlipsMsg(); });
 
-  // Save Draw
+  // Save Draw (persist all pending saved slips)
   $('#saveAllSlips').addEventListener('click', ()=>{
     const date = $('#entry_date').value; const draw = $('#entry_draw').value;
     if(!date) return alert('Pick a date for the draw.');
@@ -335,19 +345,25 @@
     alert('Saved draw with ' + bets.length + ' bets. Now enter the draw result when available.');
   });
 
-  // winning balls UI
+  // render winning balls with checkboxes
   function renderWinningBalls(){
     const container = $('#winningBalls'); container.innerHTML = '';
     store.balls.forEach(b=>{
       const id = 'winchk_'+b.id;
-      const label = document.createElement('label');
-      label.style.marginRight='8px';
-      label.innerHTML = `<input type="checkbox" id="${id}" data-ball="${b.name}" /> ${b.name} (${fmt(b.payout)})`;
-      container.appendChild(label);
+      const wrap = document.createElement('label');
+      wrap.style.marginRight='10px';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.id = id;
+      cb.dataset.ball = b.name;
+      wrap.appendChild(cb);
+      const txt = document.createTextNode(' ' + b.name + ' (' + fmt(b.payout) + ')');
+      wrap.appendChild(txt);
+      container.appendChild(wrap);
     });
   }
 
-  // Apply result
+  // apply result -> compute P/L for first pending draw matching date & draw
   $('#applyResultBtn').addEventListener('click', ()=>{
     const winNum = $('#result_number').value; const sure = !!$('#result_surecall').checked;
     if(!winNum) return $('#resultMsg').textContent = 'Enter winning number.';
@@ -361,8 +377,10 @@
       if(el && el.checked) winningBalls.push(b.name);
     });
     const basePayout = sure ? (store.payouts.surecall || 28) : (store.payouts.base || 26);
+
     target.result = { winningNumber: String(winNum), sureCall: sure, winningBalls, computedAt: new Date().toISOString() };
-    // compute
+
+    // compute each bet
     target.bets.forEach(bet=>{
       const tickets = bet.tickets || 1;
       const baseAmt = Number(bet.base || 0);
@@ -370,9 +388,12 @@
       const ballSumPerTicket = Object.values(ballAmounts).reduce((s,v)=>s + (Number(v)||0), 0);
       const totalWagerPerTicket = baseAmt + ballSumPerTicket;
       const totalWager = totalWagerPerTicket * tickets;
+
       let winPerTicket = 0;
       if(String(bet.number) === String(winNum)){
+        // base win
         winPerTicket += baseAmt * basePayout;
+        // balls that matched
         store.balls.forEach(ball=>{
           const amt = Number(ballAmounts[ball.name] || 0);
           if(amt > 0 && winningBalls.includes(ball.name)){
@@ -380,15 +401,19 @@
           }
         });
       }
+
+      // tax: 10% per full $1000 in winPerTicket (floor(win/1000)*100)
       const thousands = Math.floor(winPerTicket / 1000);
       const taxPerTicket = thousands * 100;
       const netWinPerTicket = Math.max(0, winPerTicket - taxPerTicket);
       const totalWin = netWinPerTicket * tickets;
       const pl = totalWin - totalWager;
+
       bet.totalWager = totalWager;
       bet.totalWin = totalWin;
       bet.pl = pl;
     });
+
     target.computed = true;
     save();
     $('#resultMsg').textContent = 'Result applied and P/L computed.';
@@ -400,7 +425,7 @@
     $('#result_number').value=''; $('#result_surecall').checked=false; $('#resultMsg').textContent='Cleared';
   });
 
-  // logs
+  // logs rendering & handlers
   function renderLogs(filterFrom, filterTo){
     const list = $('#logsList'); list.innerHTML = '';
     let rows = [];
@@ -430,6 +455,8 @@
       </div>`;
       list.appendChild(itm);
     });
+
+    // delete handlers
     $$('.del-log').forEach(btn=> btn.addEventListener('click', ()=>{
       const d = btn.dataset.d; const b = btn.dataset.b;
       if(!confirm('Delete this bet?')) return;
@@ -437,16 +464,26 @@
       if(!draw) return;
       draw.bets = draw.bets.filter(x=>x.id!==b);
       if(draw.bets.length===0) store.draws = store.draws.filter(x=>x.id!==d);
-      save(); renderLogs();
+      save(); renderLogs(); renderAnalytics();
     }));
+
+    // edit handlers - populate slips area with the bet for re-editing
     $$('.edit-log').forEach(btn=> btn.addEventListener('click', ()=>{
       const d = btn.dataset.d; const b = btn.dataset.b;
       const draw = store.draws.find(x=>x.id===d); if(!draw) return;
       const bet = draw.bets.find(x=>x.id===b); if(!bet) return;
-      // populate slip area for editing
+      // populate slips area for editing: create a slip with bet values and mark it saved
       $('#slipsContainer').innerHTML = '';
-      $('#slipsContainer').appendChild(createSlipElement(bet, 0));
-      // remove original
+      const slipEl = createSlipElement(bet, 0);
+      // mark it as saved so user can press Save Draw after editing (or save-slip will re-save)
+      slipEl.dataset.saved = '1';
+      slipEl.dataset.number = bet.number;
+      slipEl.dataset.base = bet.base;
+      slipEl.dataset.tickets = bet.tickets;
+      slipEl.dataset.notes = bet.notes;
+      slipEl.dataset.balls = JSON.stringify(bet.balls||{});
+      $('#slipsContainer').appendChild(slipEl);
+      // remove original bet from storage (user will re-save)
       draw.bets = draw.bets.filter(x=>x.id!==b);
       if(draw.bets.length===0) store.draws = store.draws.filter(x=>x.id!==d);
       save(); updateSlipsMsg(); show('entry');
@@ -465,6 +502,7 @@
     });
     return res;
   }
+
   function renderAnalytics(){
     const from = $('#global_from').value; const to = $('#global_to').value;
     const rows = computeRange(from,to);
@@ -505,12 +543,15 @@
     box.innerHTML = html;
   }
 
-  // settings
+  // settings: render payouts and balls
   function renderBallSettings(){
     const container = $('#ballSettings'); container.innerHTML = '';
+    // ensure default balls exist
     defaultBalls.forEach(def => { if(!store.balls.find(b=>b.name===def.name)) store.balls.unshift(Object.assign({},def)); });
-    // payout editor top
+
+    // payout editor
     const payoutHtml = document.createElement('div');
+    payoutHtml.style.marginBottom = '8px';
     payoutHtml.innerHTML = `<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
       <div style="width:200px"><label>Base payout (x $1)</label><input id="payout_base" type="number" step="0.01" value="${fmt(store.payouts.base)}" /></div>
       <div style="width:200px"><label>SureCall payout (x $1)</label><input id="payout_sure" type="number" step="0.01" value="${fmt(store.payouts.surecall)}" /></div>
@@ -522,6 +563,7 @@
       row.innerHTML = `<input type="text" data-id="${b.id}" class="ball-name" value="${b.name}" /> <input type="number" step="0.01" class="ball-payout" data-id="${b.id}" value="${fmt(b.payout)}" style="width:120px" /> <button class="btn ghost del-ball" data-id="${b.id}">Delete</button>`;
       container.appendChild(row);
     });
+
     $$('.del-ball').forEach(btn=> btn.addEventListener('click', ()=>{
       const id = btn.dataset.id;
       if(defaultBalls.find(d=>d.id===id)) return alert('Default ball cannot be deleted; edit payout instead.');
@@ -558,7 +600,7 @@
     if(!target) return alert('No saved draw bets for this date/draw');
     const rows = [['Number','Base','Balls','Tickets','Notes','TotalWager','TotalWin','PL']];
     target.bets.forEach(b=>{
-      rows.push([b.number, fmt(b.base), Object.keys(b.balls||{}).join('|') + ':' + Object.values(b.balls||{}).map(v=>fmt(v)).join('|'), b.tickets, b.notes||'', fmt(b.totalWager||0), fmt(b.totalWin||0), fmt(b.pl||0)]);
+      rows.push([b.number, fmt(b.base), Object.keys(b.balls||{}).map(k=>k+':'+fmt(b.balls[k])).join('|'), b.tickets, b.notes||'', fmt(b.totalWager||0), fmt(b.totalWin||0), fmt(b.pl||0)]);
     });
     const csv = rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
     const blob=new Blob([csv],{type:'text/csv'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`trini_draw_${date}_${draw}.csv`; a.click(); URL.revokeObjectURL(url);
@@ -566,7 +608,7 @@
 
   $('#exportCsvAll').addEventListener('click', ()=>{
     const rows=[['Date','Draw','Number','Base','Balls','Tickets','TotalWager','TotalWin','PL']];
-    store.draws.forEach(d=> d.bets.forEach(b=> rows.push([d.date,d.draw,b.number,fmt(b.base),Object.keys(b.balls||{}).join('|'),b.tickets,fmt(b.totalWager||0),fmt(b.totalWin||0),fmt(b.pl||0)])));
+    store.draws.forEach(d=> d.bets.forEach(b=> rows.push([d.date,d.draw,b.number,fmt(b.base),Object.keys(b.balls||{}).map(k=>k+':'+fmt(b.balls[k])).join('|'),b.tickets,fmt(b.totalWager||0),fmt(b.totalWin||0),fmt(b.pl||0)])));
     const csv = rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
     const blob=new Blob([csv],{type:'text/csv'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='trini_all_logs.csv'; a.click(); URL.revokeObjectURL(url);
   });
@@ -575,7 +617,7 @@
     html2canvas(document.getElementById('app'),{scale:1.3}).then(canvas=>{ canvas.toBlob(blob=>{ const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='trini_snapshot.png'; a.click(); URL.revokeObjectURL(url); },'image/png'); });
   });
 
-  // filter logs
+  // filters
   $('#filterLogsBtn').addEventListener('click', ()=> renderLogs($('#log_from').value, $('#log_to').value));
   $('#runGlobal').addEventListener('click', ()=> renderAnalytics());
 
@@ -597,7 +639,7 @@
     renderAnalytics();
   }
 
-  // init
+  // start
   function init(){
     load();
     initUI();
@@ -606,7 +648,7 @@
   }
   init();
 
-  // expose store for debug
+  // expose store for debugging if needed
   window.TriniFinBet = { store, save, load };
 })();
 </script>
